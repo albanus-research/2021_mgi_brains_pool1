@@ -1,0 +1,13 @@
+#!/bin/bash
+
+mkdir -p data/fastq/{multiplex,gex}
+indir="/home/dricardo/data/seqcore/2021_08_27_DT-2864742_Neurodegeneration_1_sample_rcvd"
+ln -s  ${indir}/TWJL-OH-1-lib1_S1_L004_R1_001.fastq.gz data/fastq/multiplex/
+ln -s  ${indir}/TWJL-OH-1-lib1_S1_L004_R2_001.fastq.gz data/fastq/multiplex/
+ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R1_001.fastq.gz data/fastq/gex/
+ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R2_001.fastq.gz data/fastq/gex/
+
+# Run cellranger
+mkdir -p work
+cd work
+cellranger multi --localcores 40 --id=cellranger --csv=../workflow/config/cellranger_config.csv

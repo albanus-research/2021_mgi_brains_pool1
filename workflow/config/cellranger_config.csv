@@ -1,0 +1,17 @@
+[gene-expression]
+ref,/home/dricardo/data/reference/human/GRCh38/cellranger
+[libraries]
+fastq_id,fastqs,lanes,feature_types
+TWJL-OH-1-lib1,/home/dricardo/work/2021_mgi_brains_pool1/data/fastq/multiplex,any,Multiplexing Capture,
+TWJL-OH-1-lib2,/home/dricardo/work/2021_mgi_brains_pool1/data/fastq/gex,any,Gene Expression,
+
+[samples]
+sample_id,cmo_ids,description
+1-301,CMO301,1-301
+1-302,CMO302,1-302
+2-303,CMO303,2-303
+2-304,CMO304,2-304
+3-305,CMO305,3-305
+3-306,CMO306,3-306
+4-307,CMO307,4-307
+4-308,CMO308,4-308
