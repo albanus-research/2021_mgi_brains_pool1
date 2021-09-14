@@ -8,6 +8,24 @@ ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R1_001.fastq.gz data/fastq/gex/
 ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R2_001.fastq.gz data/fastq/gex/
 
 # Run cellranger
+## Multi
 mkdir -p work
 cd work
-cellranger multi --localcores 40 --id=cellranger --csv=../workflow/config/cellranger_config.csv
+cellranger multi --localcores 60 --id=cellranger_redo2 \
+    --csv=../workflow/config/cellranger_config.csv
+
+## Without multiplexing library
+cd work
+ref="/home/dricardo/data/reference/human/GRCh38/cellranger/refdata-gex-GRCh38-2020-A"
+cellranger count --id cellranger_gex \
+    --sample=TWJL-OH-1-lib2 \
+    --transcriptome=${ref} \
+    --fastqs=../data/fastq/gex \
+    --include-introns \
+    --expect-cells=10000 \
+    --localcores=30 \
+    --localmem=300
+
+# Other analyses
+## Demuxlet
+snakemake -pr --configfile workflow/config/config.yml --use-conda -c1 -nq

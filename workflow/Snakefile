@@ -1,0 +1,180 @@
+from os.path import join
+
+
+FASTQ_DIR = config["fastq_dir"]
+RESULTS = config["results"]
+FASTQC_DIR = join(RESULTS, "fastqc")
+DEMUXLET_DIR = join(RESULTS, "demuxlet")
+
+
+
+rule all:
+    input:
+        join(FASTQC_DIR, "done.ok"),
+        # join(DEMUXLET_DIR, "output_only_assigned", "demux.single"),
+        join(DEMUXLET_DIR, "output_by_batch", "finished"),
+
+
+
+rule fastqc:
+    output:
+        join(FASTQC_DIR, "done.ok"),
+    params:
+        indir = FASTQ_DIR,
+        outdir = FASTQC_DIR,
+    threads:
+        6
+    shell:
+        """
+        fastqc -o {params.outdir} -t 6 {params.indir}/*.fastq.gz && \
+        touch {output}
+        """
+
+rule make_sample_list:
+    output:
+        join(DEMUXLET_DIR, "input", "sample_list.txt"),
+    params:
+        ids = " ".join(config["samples"]),
+    shell:
+        """
+        for i in {params}; do echo ${{i}}; done > {output}
+        """
+
+rule get_genic_regions:
+    input:
+        gtf = config["gene_gtf"],
+    output:
+        join(DEMUXLET_DIR, "input", "genic_regions.bed.gz"),
+    shell:
+        """
+        zgrep -v "^#" {input} | gzip > {output}.tmp.gz && \
+        gtf2bed < <(zcat {output}.tmp.gz) | \
+            mergeBed | \
+            grep "^chr[0-9]\\\\+" | \
+            gzip > {output} && \
+        rm {output}.tmp.gz
+        """
+
+rule subset_vcf_samples:
+    """
+    Additional filters to decrease variants to < 2 million:
+        - Overlap genic regions (including introns and UTRs)
+        - SNPs only (bcftools -v snps + awk length == 1)
+        - SNP called in all samples (bcftools -U)
+        - Max. 2 samples with a given genotype (-i '{params.filt}')
+    """
+    input:
+        vcf = config["sample_vcf"],
+        ids = rules.make_sample_list.output,
+        bed = rules.get_genic_regions.output,
+    output:
+        vcf = join(DEMUXLET_DIR, "input", "genotypes.vcf.gz"),
+        tbi = join(DEMUXLET_DIR, "input", "genotypes.vcf.gz.tbi"),
+    params:
+        filt = " || ".join(
+            [
+                "(COUNT(GT=\"hom\") <= 2 & COUNT(GT=\"hom\") > 0)",
+                "(COUNT(GT=\"het\") <= 2 & COUNT(GT=\"het\") > 0)"]
+        ),
+    shell:
+        """
+        bcftools view -S {input.ids} -v snps -R {input.bed} {input.vcf} | \
+            grep -vF "./." | \
+            awk 'length($5) == 1 || $0 ~ /^#/ {{print}}' | \
+            bcftools view -i '{params.filt}' - | \
+            bgzip > {output.vcf}
+        tabix -p vcf {output.vcf}
+        """
+
+rule get_barcode_list:
+    input:
+        config["barcodes_to_use"],
+    output:
+        join(DEMUXLET_DIR, "input", "barcodes.tsv"),
+    shell:
+        """
+        Rscript workflow/scripts/get_cmo-assigned_bcs.R {input} {output}
+        """
+
+rule demuxlet:
+    input:
+        bam = config["10x_bam"],
+        vcf = rules.subset_vcf_samples.output.vcf,
+        bcs = rules.get_barcode_list.output,
+    output:
+        join(DEMUXLET_DIR, "output_only_assigned", "single.best"),
+    params:
+        "--out {}".format(
+            join(DEMUXLET_DIR, "demuxlet", "output_only_assigned", "demux")
+        ),
+        "--min-MQ {}".format(config["min_mapq"]),
+        # "--min-total {}".format(config["min_umi"]),
+        "--field GT",
+        "--alpha 0 --alpha 0.5",
+    conda:
+        "envs/demuxlet.yml"
+    shell:
+        """
+        demuxlet --sam {input.bam} --vcf {input.vcf} \
+            --group-list {input.bcs} {params}
+        """
+
+checkpoint split_batches:
+    input:
+        rules.get_barcode_list.output,
+    output:
+        directory(join(DEMUXLET_DIR, "input", "batches")),
+    params:
+        handle = join(DEMUXLET_DIR, "input", "batches", "batch"),
+        n = config["n_bcs_per_batch"]
+    shell:
+        """
+        mkdir -p {output}
+        Rscript workflow/scripts/split_bc_batches.R \
+            {input} {params.handle} {params.n}
+        """
+
+rule demuxlet_batch:
+    input:
+        bam = config["10x_bam"],
+        vcf = rules.subset_vcf_samples.output.vcf,
+        bcs = join(DEMUXLET_DIR, "input", "batches", "{i}.txt"),
+    output:
+        join(DEMUXLET_DIR, "output_by_batch", "demux_{i}.single"),
+    params:
+        out = "--out {}".format(
+            join(DEMUXLET_DIR, "output_by_batch", "demux_{i}")
+        ),
+        mq = "--min-MQ {}".format(config["min_mapq"]),
+        field = "--field GT",
+        alpha = "--alpha 0 --alpha 0.5",
+    log:
+        join(DEMUXLET_DIR, "output_by_batch", "demux_{i}.log"),
+    conda:
+        "envs/demuxlet.yml"
+    shell:
+        """
+        outdir=`echo {params.out} | \
+            sed 's/--out //g' | \
+            xargs -I {{}} dirname {{}}` && \
+        mkdir -p $outdir && \
+        demuxlet --sam {input.bam} --vcf {input.vcf} \
+            --group-list {input.bcs} {params} 2>&1 | \
+            tee {log}
+        """
+
+def aggregate_input(wildcards):
+    checkpoint_output = checkpoints.split_batches.get(**wildcards).output[0]
+    return expand(
+        join(DEMUXLET_DIR, "output_by_batch", "demux_{i}.single"),
+        i=glob_wildcards(os.path.join(checkpoint_output, "{i}.txt")).i)
+
+rule demuxlet_aggregate:
+    input:
+        aggregate_input,
+    output:
+        join(DEMUXLET_DIR, "output_by_batch", "finished"),
+    shell:
+        """
+        touch {output}
+        """

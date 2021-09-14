@@ -1,0 +1,134 @@
+---
+title: "Cellranger QC"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(stringsAsFactors = F)
+seed <- 87532163
+
+library(knitr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(glue)
+
+# source("~/scripts/R_rainclouds.R")
+
+knitr::opts_knit$set(root.dir = "/home/dricardo/work/2021_mgi_brains_pool1")
+knitr::opts_chunk$set(fig.width = 4, fig.height = 4, fig.show = "hold")
+
+options(dplyr.summarise.inform = FALSE)  # Disable "`summarise()` has grouped output by 'foo'" message
+
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r}
+conf_table <- read.csv(
+  "work/cellranger_redo2/outs/multi/multiplexing_analysis/assignment_confidence_table.csv", 
+  header = T
+)
+```
+
+```{r, fig.width=4}
+conf_table %>% 
+  filter(Assignment == "Unassigned") %>% 
+  arrange(desc(Assignment_Probability)) %>% 
+  mutate(rank = 1:n()) %>% 
+  ggplot(aes(x = rank, y = Assignment_Probability)) +
+  geom_line() +
+  scale_y_continuous(limits = c(0,1))
+```
+
+```{r, fig.width=5}
+conf_table %>% 
+  filter(Assignment == "Unassigned") %>% 
+  gather("cmo", "prob", starts_with("CMO")) %>% 
+  group_by(Barcodes) %>% 
+  filter(prob == max(prob)) %>% 
+  ungroup() %>% 
+  arrange(desc(prob)) %>% 
+  mutate(rank = 1:n()) %>% 
+  ggplot(aes(x = rank, y = prob, group = cmo, color = cmo)) +
+  geom_line() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = "Rank", y = "Highest CMO assignment probability", color = "CMO")
+
+conf_table %>% 
+  filter(Assignment == "Unassigned") %>% 
+  gather("cmo", "prob", starts_with("CMO")) %>% 
+  group_by(Barcodes) %>% 
+  filter(prob == max(prob)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = cmo, y = prob)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = "CMO", y = "Highest CMO assignment probability",
+       title = "Unassigned barcodes") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5))
+```
+
+```{r}
+conf_table %>% 
+  filter(Assignment == "Unassigned") %>% 
+  gather("cmo", "prob", starts_with("CMO")) %>% 
+  group_by(Barcodes) %>% 
+  filter(prob == max(prob)) %>% 
+  ungroup() %>% 
+  group_by(cmo) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = cmo, y = n)) +
+  geom_col(fill = "gray", color = "black") +
+  labs(x = "CMO", y = "Number with highest prob.", 
+       title = "Unassigned barcodes") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5))
+```
+
+
+
+```{r, fig.width=5}
+cmos <- read.csv("~/data/misc/10x_adapters/CMOs.csv", header = T)
+
+fastq_cmos <- read.table("cmos.txt", col.names = c("count", "sequence")) %>% 
+  full_join(cmos, by = "sequence") %>% 
+  mutate(name = case_when(is.na(name) ~ "No match", T ~ name))
+
+fastq_cmos %>% 
+  group_by(name) %>% 
+  summarise(count = sum(count)) %>% 
+  ggplot(aes(x = name, y = count)) +
+  geom_col(fill = "gray", color = "black") +
+  scale_y_log10(labels = comma) +
+  labs(x = "CMO (exact match)", y = "Count", 
+       title = "Pool 1 CellPlex fastq R2", 
+       subtitle = "Initial 15 bp of the first 5,000,000 reads") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5))
+```
+
+```{r, fig.width=5}
+fastq_cmos2 <- read.table("~/work/2021_mgi_brains_pool2/cmos.txt", 
+                          col.names = c("count", "sequence")) %>% 
+  full_join(cmos, by = "sequence") %>% 
+  mutate(name = case_when(is.na(name) ~ "No match", T ~ name))
+
+fastq_cmos2 %>% 
+  group_by(name) %>% 
+  summarise(count = sum(count)) %>% 
+  ggplot(aes(x = name, y = count)) +
+  geom_col(fill = "gray", color = "black") +
+  scale_y_log10(labels = comma) +
+  labs(x = "CMO (exact match)", y = "Count", 
+       title = "Pool 2 CellPlex fastq R2", 
+       subtitle = "Initial 15 bp of the first 5,000,000 reads") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5))
+```
+

@@ -2,7 +2,7 @@
 reference,/home/dricardo/data/reference/human/GRCh38/cellranger/refdata-gex-GRCh38-2020-A
 include-introns,true
 expect-cells,10000
-min-assignment-confidence,0.9
+min-assignment-confidence,0.7
 
 [libraries]
 fastq_id,fastqs,feature_types

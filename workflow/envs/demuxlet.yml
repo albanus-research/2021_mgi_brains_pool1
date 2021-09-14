@@ -1,0 +1,7 @@
+channels:
+  - defaults
+  - conda-forge
+  - anaconda
+  - bioconda
+dependencies:
+  - demuxlet

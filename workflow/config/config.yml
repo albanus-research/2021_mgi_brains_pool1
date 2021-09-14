@@ -1,0 +1,31 @@
+results: "work"
+fastq_dir: 
+  "/home/dricardo/data/seqcore/\
+   2021_08_27_DT-2864742_Neurodegeneration_1_sample_rcvd"
+
+# Demuxlet config
+10x_bam: 
+  "work/cellranger_gex/outs/possorted_genome_bam.bam"
+sample_vcf: 
+  "/home/dricardo/data/genotypes/2021_gwas_brains_oscar/\
+  GRCh38/Brain_GWAS_2020.no_swap.vcf.gz"
+min_mapq: 255
+min_umi: 500  # not necessary when pre-selecting CBs to use
+n_bcs_per_batch: 1001  # Multiples of 1K trigger BC count message constantly...
+barcodes_to_use: 
+  "work/cellranger_multi/outs/multi/multiplexing_analysis/\
+  assignment_confidence_table.csv"
+gene_gtf: 
+  "/home/dricardo/data/reference/human/GRCh38/annot/\
+  gencode.v32.primary_assembly.annotation.gtf.gz"
+
+samples:
+  - "MAP_479^unk^660k_MAP_479^unk^660k"
+  - "MAP_1015^NoUDSProg1_F09^2011OmniEx_MAP_1015^NoUDSProg1_F09^2011OmniEx"
+  - "MAP_11787^08AD9097^2013_660k_NACCR1_MAP_11787^08AD9097^2013_660k_NACCR1"
+  - "MAP_60405^unk^660k_MAP_60405^unk^660k"
+  - "MAP_60974^08AD09104^2013_660k_NACCR1_MAP_60974^08AD09104^2013_660k_NACCR1"
+  - "MAP_61649^unk^660k_MAP_61649^unk^660k"
+  - "MAP_61681^8008294621^2013OmniEx_MAP_61681^8008294621^2013OmniEx"
+  - "NIALOAD_27_90_84559^unk^Human610-Quadv1_NIALOAD_27_90_84559^unk^\
+     Human610-Quadv1"
