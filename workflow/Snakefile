@@ -4,14 +4,13 @@ from os.path import join
 FASTQ_DIR = config["fastq_dir"]
 RESULTS = config["results"]
 FASTQC_DIR = join(RESULTS, "fastqc")
-DEMUXLET_DIR = join(RESULTS, "demuxlet")
+DEMUXLET_DIR = join(RESULTS, "demuxlet_rm_singletons_only")
 
 
 
 rule all:
     input:
         join(FASTQC_DIR, "done.ok"),
-        # join(DEMUXLET_DIR, "output_only_assigned", "demux.single"),
         join(DEMUXLET_DIR, "output_by_batch", "finished"),
 
 
@@ -61,7 +60,7 @@ rule subset_vcf_samples:
         - Overlap genic regions (including introns and UTRs)
         - SNPs only (bcftools -v snps + awk length == 1)
         - SNP called in all samples (bcftools -U)
-        - Max. 2 samples with a given genotype (-i '{params.filt}')
+        - Remove non-polymorphic sites
     """
     input:
         vcf = config["sample_vcf"],
@@ -73,15 +72,18 @@ rule subset_vcf_samples:
     params:
         filt = " || ".join(
             [
-                "(COUNT(GT=\"hom\") <= 2 & COUNT(GT=\"hom\") > 0)",
-                "(COUNT(GT=\"het\") <= 2 & COUNT(GT=\"het\") > 0)"]
+                "COUNT(GT=\"AA\")=N_SAMPLES", 
+                "COUNT(GT=\"RR\")=N_SAMPLES",
+                "COUNT(GT=\"RA\")=N_SAMPLES",
+                "COUNT(GT=\"AR\")=N_SAMPLES"
+            ]
         ),
     shell:
         """
         bcftools view -S {input.ids} -v snps -R {input.bed} {input.vcf} | \
             grep -vF "./." | \
             awk 'length($5) == 1 || $0 ~ /^#/ {{print}}' | \
-            bcftools view -i '{params.filt}' - | \
+            bcftools view -e '{params.filt}' - | \
             bgzip > {output.vcf}
         tabix -p vcf {output.vcf}
         """

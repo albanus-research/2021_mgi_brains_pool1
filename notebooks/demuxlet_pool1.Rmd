@@ -1,0 +1,315 @@
+---
+title: "Demuxlet"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(stringsAsFactors = F)
+seed <- 87532163
+
+library(knitr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(glue)
+
+# source("~/scripts/R_rainclouds.R")
+
+knitr::opts_knit$set(root.dir = "/home/dricardo/work/2021_mgi_brains_pool1")
+knitr::opts_chunk$set(fig.width = 4, fig.height = 4, fig.show = "hold")
+
+options(dplyr.summarise.inform = FALSE)  # Disable "`summarise()` has grouped output by 'foo'" message
+
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r}
+conf_table <- read.csv(
+  "work/cellranger_multi/outs/multi/multiplexing_analysis/assignment_confidence_table.csv", 
+  header = T
+)
+bc_assignments <- conf_table %>% 
+  select(Barcodes, Assignment, Assignment_Probability) %>% 
+  rename(BARCODE = Barcodes)
+```
+
+```{r}
+cmo_ids <- read.table("data/cmo_assignments.txt", header = T)
+```
+
+```{r}
+mol_info <- DropletUtils::read10xMolInfo("work/cellranger_gex/outs/molecule_info.h5")
+bc_md2<- data.frame(
+  barcode = paste0(mol_info$data$cell, "-1"), 
+  n_umi = mol_info$data$umi,
+  reads = mol_info$data$reads
+) %>% 
+  filter(barcode %in% conf_table$Barcodes) %>% 
+  group_by(barcode) %>% 
+  summarise(n_umi = sum(n_umi),
+            reads = sum(reads))
+```
+
+```{r}
+demux <- lapply(1:16, function(i) {
+  read.table(
+    glue("work/demuxlet/output_by_batch/demux_batch.{i}_16.best"), header = T, sep ="\t"
+  )
+}) %>% 
+  bind_rows() %>% 
+  mutate(call = gsub("-.*", "", BEST)) %>% 
+  mutate(best_short = gsub("\\^.*", "", BEST)) %>% 
+  mutate(best_short = gsub(".*-", "", best_short)) %>% 
+  full_join(bc_assignments, by = "BARCODE") %>% 
+  mutate(run = "1st")
+
+demux2 <- lapply(1:16, function(i) {
+  read.table(
+    glue("work/demuxlet_rm_singletons_only/output_by_batch/demux_batch.{i}_16.best"), header = T, sep ="\t"
+  )
+}) %>% 
+  bind_rows() %>% 
+  mutate(call = gsub("-.*", "", BEST)) %>% 
+  mutate(best_short = gsub("\\^.*", "", BEST)) %>% 
+  mutate(best_short = gsub(".*-", "", best_short)) %>% 
+  full_join(bc_assignments, by = "BARCODE") %>% 
+  mutate(run = "2nd")
+
+demux <- bind_rows(demux, demux2)
+rm(demux2)
+```
+
+
+```{r, fig.width=3}
+table(demux$call, demux$run)
+
+table(demux$call, demux$run) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(x = Var2, y = Freq, fill = Var1)) +
+  geom_col() +
+  labs(x = "Demuxlet run", y = "Barcodes", fill = "Assignment")
+```
+
+```{r}
+demux %>% 
+  ggplot(aes(x = N.SNP)) +
+  geom_histogram(color = "black", fill = "gray") +
+  scale_x_log10(label = comma) +
+  facet_wrap(~ run) +
+  labs(x = "Number of SNPs overlapping reads", y = "Count")
+
+demux %>% 
+  ggplot(aes(x = N.SNP)) +
+  geom_histogram(color = "black", fill = "gray") +
+  facet_wrap(~ run) +
+  labs(x = "Number of SNPs overlapping reads", y = "Count")
+
+demux %>% 
+  filter(N.SNP <= 5000) %>% 
+  ggplot(aes(x = N.SNP)) +
+  geom_histogram(color = "black", fill = "gray") +
+  facet_wrap(~ run) +
+  labs(x = "Number of SNPs overlapping reads", y = "Count") 
+```
+
+```{r}
+demux %>% 
+  filter(N.SNP <= 100) %>% 
+  count(call, run)
+```
+
+
+
+```{r}
+demux %>% 
+  ggplot(aes(x = PRB.SNG1)) +
+  geom_histogram()
+
+demux %>% 
+  ggplot(aes(x = PRB.DBL)) +
+  geom_histogram()
+
+demux %>% 
+  ggplot(aes(x = PRB.SNG1, y = PRB.DBL)) +
+  geom_point()
+```
+
+```{r}
+demux %>% 
+  filter(call == "SNG") %>% 
+  count(SNG.1ST) %>% 
+  mutate(SNG.1ST = gsub("\\^.*", "", SNG.1ST)) %>% 
+  arrange(desc(n))
+
+demux %>% 
+  filter(call == "SNG") %>% 
+  count(SNG.2ND) %>% 
+  mutate(SNG.2ND = gsub("\\^.*", "", SNG.2ND)) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+demux %>% 
+  filter(call == "DBL") %>% 
+  count(SNG.1ST) %>% 
+  mutate(SNG.1ST = gsub("\\^.*", "", SNG.1ST)) %>% 
+  arrange(desc(n))
+
+demux %>% 
+  filter(call == "DBL") %>% 
+  count(SNG.2ND) %>% 
+  mutate(SNG.2ND = gsub("\\^.*", "", SNG.2ND)) %>% 
+  arrange(desc(n))
+```
+
+```{r, fig.width=7}
+possible <- c("MAP_1015", "MAP_61649", "MAP_11787", "MAP_60974")
+demux %>% 
+  filter(call == "DBL") %>%
+  select(BARCODE, BEST, run) %>% 
+  mutate(BEST = gsub("-Quad", "_Quad", BEST)) %>% 
+  separate(BEST, c("call2", "id1", "id2", "alpha"), "-") %>% 
+  mutate(id1 = gsub("\\^.*", "", id1)) %>% 
+  mutate(id2 = gsub("\\^.*", "", id2)) %>% 
+  select(-alpha, -call2) %>% 
+  count(id1, id2, run) %>% 
+  mutate(id1_ok = id1 %in% possible,
+         id2_ok = id2 %in% possible) %>% 
+  mutate(impossible = !id1_ok | !id2_ok) %>% 
+  ggplot(aes(x = id1, id2, fill = n)) +
+  geom_tile() +
+  geom_point(aes(alpha = impossible)) +
+  scale_fill_distiller(palette = "Reds", direction = 1, trans = "log10") +
+  scale_alpha_manual(values = c(0, 1)) +
+  labs(x = "Doublet ID 1", y = "Doublet ID 2") +
+  facet_wrap(~ run) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+```{r, fig.width=6, fig.height=5}
+calls <- demux %>% 
+  filter(call %in% c("SNG", "DBL")) %>% 
+  group_by(call, best_short, run) %>% 
+  count(Assignment) %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n))
+
+calls %>% 
+  ggplot(aes(x = best_short, y = Assignment, fill = frac)) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 2.5) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  facet_grid(run ~ call) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "All nuclei barcodes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+calls %>% 
+  filter(Assignment != "Unassigned") %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n)) %>% 
+  ggplot(aes(x = best_short, y = Assignment, fill = frac)) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 3) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  facet_grid(run ~ call) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "CMO-assigned only") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+```{r, fig.width=6, fig.height=5}
+calls2 <- demux  %>% 
+  left_join(cmo_ids, by = c("Assignment" = "CMO")) %>% 
+  filter(call %in% c("SNG", "DBL")) %>% 
+  mutate(to_use = freeze) %>% 
+  mutate(to_use = case_when(is.na(to_use) ~ Assignment, T ~ to_use)) %>% 
+  group_by(call, best_short, run) %>% 
+  count(to_use) %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n)) %>% 
+  mutate(n_log10 = floor(log10(n))) 
+  
+
+calls2 %>% 
+  ggplot(aes(x = best_short, y = to_use, fill = log10(n))) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 2.5) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  facet_grid(run ~ call) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "All nuclei barcodes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+calls2 %>% 
+  filter(to_use != "Unassigned") %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n)) %>% 
+  ggplot(aes(x = best_short, y = to_use, fill = log10(n))) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 3) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  facet_grid(run ~ call) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "CMO-assigned only") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+```{r, fig.height=3.5, fig.width=6}
+calls2 %>% 
+  filter(to_use != "Unassigned", call == "SNG") %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n)) %>% 
+  ggplot(aes(x = best_short, y = to_use, fill = log10(n))) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 3) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  facet_wrap(~ run) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "CMO-assigned barcodes only",
+       subtitle = "Cellranger min. conf. =  0.9") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+
+```
+
+```{r, fig.width=7}
+calls2 %>% 
+  filter(call == "SNG") %>% 
+  group_by(call, best_short) %>% 
+  mutate(frac = n / sum(n)) %>% 
+  ggplot(aes(x = best_short, y = to_use, fill = log10(n))) +
+  geom_tile() +
+  geom_text(aes(label = n), size = 3) +
+  # geom_point(aes(size = log10(n))) +
+  # scale_size_manual(values = c(0.2, .5, 1, 1.5), breaks = c(1,10, 100, 1000)) +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  facet_wrap(~ run) +
+  labs(x = "Demuxlet assignment", y = "CMO assignment", 
+       title = "All nuclei barcodes",
+       subtitle = "Cellranger min. conf. =  0.9") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+

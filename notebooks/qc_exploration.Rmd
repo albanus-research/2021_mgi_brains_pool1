@@ -1,0 +1,218 @@
+---
+title: "QC exploration"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(stringsAsFactors = F)
+seed <- 87532163
+
+library(knitr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(glue)
+
+library(ggpointdensity)
+library(Matrix)
+
+# source("~/scripts/R_rainclouds.R")
+
+knitr::opts_knit$set(root.dir = "/home/dricardo/work/2021_mgi_brains_pool1")
+knitr::opts_chunk$set(fig.width = 4, fig.height = 4, fig.show = "hold")
+
+options(dplyr.summarise.inform = FALSE)  # Disable "`summarise()` has grouped output by 'foo'" message
+
+theme_set(theme_bw(base_size = 12))
+```
+
+# Read all barcodes
+```{r}
+indir1 <- "work/cellranger_gex/outs/raw_feature_bc_matrix"
+indir2 <- file.path("../2021_mgi_brains_pool2", indir1)
+
+read_raw_counts <- function(indir) {
+  bc <- read.table(file.path(indir, "barcodes.tsv.gz"))[,1]
+  features <- read.table(file.path(indir, "features.tsv.gz"))[,2]
+  mat <- readMM(file.path(indir, "matrix.mtx.gz"))
+  colnames(mat) <- bc
+  rownames(mat) <- features
+  return(mat)
+}
+
+m1 <- read_raw_counts(indir1)
+m2 <- read_raw_counts(indir2)
+```
+
+```{r}
+indir1 <- "work/cellranger_gex/outs/filtered_feature_bc_matrix"
+indir2 <- file.path("../2021_mgi_brains_pool2", indir1)
+
+get_cellranger_bcs <- function(indir) {
+  bc <- read.table(file.path(indir, "barcodes.tsv.gz")) %>% 
+    rename(barcode = V1)
+  return(bc)
+}
+
+bc1 <- get_cellranger_bcs(indir1) %>% 
+  mutate(pool = "pool1")
+
+bc2 <- get_cellranger_bcs(indir2) %>% 
+  mutate(pool = "pool2")
+
+called_bcs <- bind_rows(bc1, bc2) %>% 
+  mutate(cellranger_nuclei = T)
+rm(bc1, bc2)
+```
+
+
+# Calculate per-barcode QC metrics
+```{r}
+get_qc <- function(mat, id) {
+  depths <- colSums(mat)
+  mt <- mat[grep("^MT-", rownames(mat)), ]
+  mt <- colSums(mt)
+  mt <- mt / depths
+  mt[is.na(mt)] <- 0
+  
+  if(all(names(mt) == names(depths))) {
+    out_df <- data.frame(barcode = names(mt),
+                         nUMI = unname(depths),
+                         pctMT = unname(mt),
+                         pool = id)
+    return(out_df)
+  }  
+}
+
+# qc <- get_qc(m1, "pool1") %>%
+#   bind_rows(get_qc(m2, "pool2")) %>% 
+#   left_join(called_bcs, by = c("barcode", "pool"))
+# qc$cellranger_nuclei[is.na(qc$cellranger_nuclei)] <- F
+# 
+# dir.create("work/qc")
+# write.table(qc, gzfile("work/qc/barcode_metrics.tsv.gz"), sep = "\t", quote = F,
+#             col.names = T, row.names = F)
+qc <- data.table::fread("work/qc/barcode_metrics.tsv.gz", header = T, data.table = F)
+qc$pool <- gsub("^p", "P", qc$pool)
+```
+
+```{r, fig.width=8}
+qc %>% 
+    ggplot(aes(x = nUMI + 1, y = pctMT)) +
+    geom_hex(bins = 100) +
+    geom_hline(yintercept = 0.2, lty = "dashed", color = "red") +
+    # geom_vline(xintercept = 500, lty = "dashed", color = "red") +
+    facet_wrap(~ pool) +
+    scale_x_log10(labels = comma) +
+    scale_fill_viridis_c(trans = "log10", labels = comma) +
+    labs(x = "Number of UMIs per barcode", y = "Fraction MT",
+         fill = "Barcodes")
+
+qc %>% 
+    ggplot(aes(x = nUMI + 1, y = pctMT)) +
+    geom_point(alpha = .01, size = .5) +
+    geom_hline(yintercept = 0.2, lty = "dashed", color = "red") +
+    # geom_vline(xintercept = 500, lty = "dashed", color = "red") +
+    facet_wrap(~ pool) +
+    scale_x_log10(labels = comma) +
+    labs(x = "Number of UMIs per barcode", y = "Fraction MT")
+```
+
+```{r, fig.width=8, fig.height=2.3}
+qc %>% 
+  filter(nUMI > 1000, pctMT < 0.2) %>% 
+  ggplot(aes(x = nUMI + 1, y = pctMT)) +
+  geom_point(alpha = .05, size = .5) +
+  facet_wrap(~ pool) +
+  scale_x_log10(labels = comma) +
+  labs(x = "Number of UMIs per barcode", y = "Fraction MT")
+```
+
+
+```{r, fig.width=8}
+qc %>% 
+  filter(nUMI > 1000, pctMT < 0.2) %>% 
+  ggplot(aes(x = nUMI + 1, y = pctMT)) +
+  geom_point(alpha = .05, size = .5) +
+  geom_hline(yintercept = 0.2, lty = "dashed", color = "red") +
+  geom_vline(xintercept = c(10^3, 1500, 2000), lty = "dashed", color = "blue") +
+  facet_grid(cellranger_nuclei ~ pool) +
+  scale_x_log10(labels = comma) +
+  labs(x = "Number of UMIs per barcode", y = "Fraction MT")
+```
+
+
+```{r, fig.width=5}
+plot_pool <- function(pool_choose) {
+  qc %>% 
+    filter(nUMI >= 500, pool == pool_choose) %>% 
+    ggplot(aes(x = nUMI, y = pctMT)) +
+    geom_pointdensity(size = .5) +
+    facet_wrap(~ pool) +
+    scale_x_log10(labels = comma) +
+    scale_color_viridis_c(trans = "log10") 
+}
+
+plot_pool("pool1")
+plot_pool("pool2")
+
+plot_pool <- function(pool_choose) {
+  qc %>% 
+    filter(nUMI >= 500, pool == pool_choose,
+           cellranger_nuclei) %>% 
+    ggplot(aes(x = nUMI, y = pctMT)) +
+    geom_pointdensity(size = .5) +
+    facet_wrap(~ pool) +
+    scale_x_log10(labels = comma) +
+    scale_color_viridis_c(trans = "log10") 
+}
+
+plot_pool("pool1")
+plot_pool("pool2")
+```
+
+```{r, fig.width=6}
+plot_pool <- function(pool_choose) {
+  qc %>% 
+    filter(nUMI >= 500, pool == pool_choose) %>% 
+    ggplot(aes(x = nUMI, y = pctMT)) +
+    geom_pointdensity(size = .5) +
+    facet_wrap(~ cellranger_nuclei) +
+    scale_x_log10(labels = comma) +
+    scale_color_viridis_c(trans = "log10") +
+    labs(title = pool_choose)
+}
+
+plot_pool("pool1")
+plot_pool("pool2")
+```
+
+
+```{r, fig.width=5}
+plot_pool <- function(pool_choose) {
+  qc %>% 
+    filter(pool == pool_choose) %>% 
+    filter(nUMI >= 500, pctMT < 0.2, cellranger_nuclei) %>% 
+    ggplot(aes(x = nUMI, y = pctMT)) +
+    geom_pointdensity(size = .5) +
+    # geom_point(alpha = .1, size = .5) +
+    facet_wrap(~ pool, scales = "free") +
+    scale_x_log10(labels = comma) +
+    scale_color_viridis_c(trans = "log10") +
+    labs(subtitle = "≥500 UMIs, ≤20% MT, called by Cellranger")
+}
+
+plot_pool("pool1")
+plot_pool("pool2")
+```
+
+

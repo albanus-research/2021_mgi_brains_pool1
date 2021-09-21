@@ -1,3 +1,5 @@
+IONICE: "ionice -c2 -n7"
+
 results: "work"
 fastq_dir: 
   "/home/dricardo/data/seqcore/\

@@ -1,0 +1,262 @@
+---
+title: "Explore RNA soup"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(stringsAsFactors = F)
+seed <- 87532163
+
+library(knitr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(glue)
+
+library(ggrepel)
+library(Matrix)
+
+# source("~/scripts/R_rainclouds.R")
+
+knitr::opts_knit$set(root.dir = "/home/dricardo/work/2021_mgi_brains_pool1")
+knitr::opts_chunk$set(fig.width = 4, fig.height = 4, fig.show = "hold")
+
+options(dplyr.summarise.inform = FALSE)  # Disable "`summarise()` has grouped output by 'foo'" message
+
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r}
+marker_genes <- list(
+  OPCs = c(
+    'TNR','PDGFRA', 'CNTN1'
+    ),
+  Oligos = c(
+    'QDPR','TULP4','PIP4K2A','TMEM144','SLC44A1','CNP','SLAIN1','ANLN','MOBP',
+    'SCD','CNDP1','MBP','ERMN','CLDND1','UGT8','TTLL7','SLC24A2','ENPP2','TF',
+    'PLP1',
+    "MOG",'OPALIN','SEPT4'
+    ), 
+  Neurons = c(  
+    'PCLO','GABRA1','SCG2','UCHL1','GABRB2','GAD1','VSNL1','STMN2','RTN1',
+    'SNAP25','SYT1','SCN2A','DLX6-AS1','SYNPR',
+    'CNR1','RELN'
+    ), 
+  Neurons_exc = c(
+    "RALYL", "KCNIP4", "CBLN2", "LDB2", "KCNQ5",
+    "SCL17A7", "SATB2"
+  ),
+  Neurons_inh = c(
+    "NXPH1", "LHFPL3", "PCDH15", "GRIK1", "ADARB2",
+    "GAD2"
+  ),
+  Microglia = c(
+    'C3','CCL4','MSR1','OLR1','GPR183','CD53','LCP1','HAVCR2','LHFPL2','PLEK',
+    'HLA-DRA','CD74','CX3CR1','C3AR1','CLEC7A','B3GNT5',
+    'CD83','IL1B','CH25H',
+    "CSF1R", "P2RY12"
+    ),
+  Endothelial = c(
+    'NET1','FN1','APOLD1','TM4SF1','ABCG2','RGS5','DCN',
+    "VWF"
+  ),
+  Astrocytes = c(
+    'SLCO1C1','ATP1B2','CPE','AQP4','EDNRB','SLC4A4','GJA1','SLC1A2','CLU',
+    'ETNPPL','F3','RYR3',
+    'DIO2','GPR37L1',
+    "PDGFRA", # Also in OPCs
+    "CSPG4", "GFAP"
+  )
+) %>% 
+  unlist() %>% 
+  unique()
+```
+
+```{r}
+qc <- data.table::fread("work/seurat/barcode_metrics.tsv.gz", header = T, data.table = F) %>% 
+  mutate(barcode  = case_when(pool == "pool2" ~ gsub("-1$", "-2", barcode), 
+                              T ~ barcode)) 
+```
+
+```{r}
+bc_ranks <- qc %>% 
+  select(pool, nUMI) %>% 
+  group_by(pool) %>% 
+  arrange(desc(nUMI)) %>% 
+  mutate(rank = 1:n())
+```
+
+```{r, fig.width=6}
+bc_ranks %>% 
+  ggplot(aes(x = rank, y = nUMI, color = pool, group = pool)) +
+  geom_line() +
+  scale_x_log10(labels = comma) +
+  scale_y_log10(labels = comma) +
+  scale_color_brewer(palette = "Set1") +
+  labs(x = "Barcode rank", y = "Number of UMIs")
+```
+
+```{r}
+soup_threshold <- 25
+
+table(qc$nUMI <= soup_threshold, qc$pool)
+
+soup_barcodes <- qc %>% 
+  filter(nUMI <= soup_threshold) %>% 
+  pull(barcode)
+```
+
+
+
+```{r}
+indir1 <- "work/cellranger_gex/outs/raw_feature_bc_matrix"
+indir2 <- file.path("../2021_mgi_brains_pool2", indir1)
+
+read_raw_counts <- function(indir) {
+  bc <- read.table(file.path(indir, "barcodes.tsv.gz"))[,1]
+  features <- read.table(file.path(indir, "features.tsv.gz"))[,2]
+  mat <- readMM(file.path(indir, "matrix.mtx.gz"))
+  colnames(mat) <- bc
+  rownames(mat) <- features
+  return(mat)
+}
+
+m1 <- read_raw_counts(indir1)
+m2 <- read_raw_counts(indir2)
+colnames(m2) <- gsub("-1$", "-2", colnames(m2))
+
+dim(m1)
+dim(m2)
+```
+
+```{r}
+soup_mats <- list(
+  pool1 = m1[,which(colnames(m1) %in% soup_barcodes)],
+  pool2 = m2[,which(colnames(m2) %in% soup_barcodes)]  
+)
+```
+
+```{r}
+soup_counts <- names(soup_mats) %>% 
+  lapply(function(i) {
+    gene_counts <- rowSums(soup_mats[[i]])
+    data.frame(gene = names(gene_counts),
+               count = unname(gene_counts),
+               pool = i)
+  }) %>% 
+  bind_rows() %>% 
+  filter(count > 0) %>% 
+  group_by(pool) %>% 
+  mutate(frac = count / sum(count)) %>% 
+  arrange(desc(frac)) %>% 
+  mutate(rank = 1:n()) %>% 
+  ungroup()
+
+write.table(soup_counts, file = "work/seurat/soup.txt", col.names = T, 
+            row.names = F, sep = "\t", quote = F)
+```
+
+```{r}
+dups <- table(soup_counts$gene) %>% 
+  as.data.frame() %>% 
+  arrange(desc(Freq)) %>% 
+  filter(Freq > 2) %>% 
+  mutate(Var1 = as.character(Var1)) %>% 
+  pull(Var1)
+
+soup_counts %>% 
+  filter(gene %in% dups) %>% 
+  arrange(desc(frac))
+```
+
+
+```{r, fig.width=6, fig.height=5}
+soup_counts_wide <- soup_counts %>% 
+  filter(!gene %in% dups) %>% 
+  select(gene, pool, frac) %>% 
+  spread(pool, frac) %>% 
+  mutate(to_plot = gene %in% soup_counts$gene[soup_counts$rank <= 12 & soup_counts$pool == "pool1"])
+
+soup_counts_wide %>% 
+  mutate(marker = gene %in% marker_genes) %>% 
+  ggplot(aes(x = pool1, y = pool2)) +
+  geom_point(aes(color = marker)) +
+  geom_text_repel(aes(label = gene), data = filter(soup_counts_wide, to_plot), size = 3) +
+  scale_color_manual(values = c("black", "red")) +
+  labs(x = "Fraction of pool 1 soup", y = "Fraction of pool 2 soup",
+       color = "Marker gene",
+       title = "Pools 1 and 2 soup composition",
+       subtitle = glue("Soup: barcodes with ≤ {soup_threshold <- 10} UMIs"))
+
+soup_counts_wide %>% 
+  mutate(marker = gene %in% marker_genes) %>% 
+  ggplot(aes(x = pool1, y = pool2)) +
+  geom_point(aes(color = marker)) +
+  geom_point(data = soup_counts_wide[soup_counts_wide$gene %in% marker_genes,], 
+             color = "red") +
+  scale_color_manual(values = c("black", "red")) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Fraction of pool 1 soup", y = "Fraction of pool 2 soup",
+       color = "Marker gene",
+       title = "Pools 1 and 2 soup composition",
+       subtitle = glue("Soup: barcodes with ≤ {soup_threshold <- 10} UMIs"))
+```
+
+```{r, fig.height=3.5, fig.width=8}
+soup_markers <- soup_counts %>% 
+  filter(gene %in% marker_genes) %>% 
+  group_by(gene) %>% 
+  mutate(min_rank = min(rank)) %>% 
+  ungroup() %>% 
+  arrange(min_rank)
+
+gene_ord <- soup_markers %>% 
+  select(gene, min_rank) %>% 
+  distinct() %>% 
+  pull(gene)
+
+soup_markers %>% 
+  mutate(gene = factor(gene, levels = gene_ord)) %>% 
+  filter(min_rank <= 1000) %>% 
+  ggplot(aes(x = gene, y = pool, fill = rank)) +
+  geom_tile() +
+  scale_fill_distiller(
+    palette = "Reds", direction = -1, trans = "log10", labels = comma
+  ) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(x = "Marker gene", y = "Pool", fill = "Soup rank",
+       subtitle = glue("Soup: barcodes with ≤ {soup_threshold <- 10} UMIs"))
+
+soup_markers %>% 
+  mutate(gene = factor(gene, levels = gene_ord)) %>% 
+  filter(min_rank <= 1000) %>% 
+  ggplot(aes(x = gene, y = pool, fill = frac)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "Reds", direction = 1) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(x = "Marker gene", y = "Pool", fill = "Soup fraction",
+       subtitle = glue("Soup: barcodes with ≤ {soup_threshold <- 10} UMIs"))
+```
+
+```{r, fig.height=4, fig.width=9}
+soup_counts %>% 
+  filter(rank <= 30) %>% 
+  ggplot(aes(x = rank, y = frac, label = gene)) +
+  geom_point() +
+  geom_text_repel(size = 2) +
+  facet_wrap(~ pool, ncol = 1) +
+  scale_y_log10(labels = comma) +
+  labs(x = "Soup rank", y = "Soup fraction",
+       subtitle = glue("Soup: barcodes with ≤ {soup_threshold <- 10} UMIs"))
+```
+

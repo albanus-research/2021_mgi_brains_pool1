@@ -1,0 +1,109 @@
+---
+title: "PLACEHOLDER"
+output:
+  html_document:
+    theme: readable
+    df_print: paged
+    code_folding: hide
+    toc: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+options(stringsAsFactors = F)
+seed <- 87532163
+
+library(knitr)
+library(ggplot2)
+library(RColorBrewer)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(glue)
+
+library(Matrix)
+
+# source("~/scripts/R_rainclouds.R")
+
+knitr::opts_knit$set(root.dir = "/home/dricardo/work/2021_mgi_brains_pool1")
+knitr::opts_chunk$set(fig.width = 4, fig.height = 4, fig.show = "hold")
+
+options(dplyr.summarise.inform = FALSE)  # Disable "`summarise()` has grouped output by 'foo'" message
+
+theme_set(theme_bw(base_size = 12))
+```
+
+```{r}
+maindir <- file.path("/40/Cruchaga_Data/singleNuclei/201812_unsorted_ADvariants",
+                   "02.-ProcessedData/03.-CellRanger/3prime/parietal")
+samples <- list.files(maindir, "3prime")
+samples <- samples[seq(1, 40, by = 16)]
+```
+
+# Randomly select 5 samples to QC
+```{r}
+read_raw_counts <- function(sample_use, id_number) {
+  message(glue("Processing {sample_use}"))
+  indir <- file.path(maindir, sample_use, "outs/raw_feature_bc_matrix")
+  bc <- read.table(file.path(indir, "barcodes.tsv.gz"))[,1]
+  bc <- gsub("1$", id_number, bc)
+  features <- read.table(file.path(indir, "features.tsv.gz"))[,2]
+  mat <- readMM(file.path(indir, "matrix.mtx.gz"))
+  colnames(mat) <- bc
+  rownames(mat) <- features
+  return(mat)
+}
+
+mats <- seq_along(samples) %>% 
+  lapply(function(i) read_raw_counts(samples[i], i)) %>% 
+  setNames(samples)
+
+lapply(mats, dim)
+```
+
+```{r}
+get_qc <- function(mat, id) {
+  message(glue("Processing QC for {id}"))
+  depths <- colSums(mat)
+  mt <- mat[grep("^MT-", rownames(mat)), ]
+  mt <- colSums(mt)
+  mt <- mt / depths
+  mt[is.na(mt)] <- 0
+  
+  if(all(names(mt) == names(depths))) {
+    out_df <- data.frame(barcode = names(mt),
+                         nUMI = unname(depths),
+                         pctMT = unname(mt),
+                         pool = id)
+    return(out_df)
+  } else {
+    stop("Names do not match!")
+  }
+}
+
+qc_70_brains <- seq_along(samples) %>% 
+  lapply(function(i) get_qc(mats[[i]], samples[i])) %>% 
+  bind_rows()
+```
+
+```{r, fig.width=6, fig.height=6}
+qc_70_brains %>% 
+  filter(nUMI > 1000) %>% 
+  ggplot(aes(x = nUMI + 1, y = pctMT)) +
+  geom_point(alpha = .01, size = .5) +
+  geom_hline(yintercept = 0.2, lty = "dashed", color = "red") +
+  facet_wrap(~ pool, ncol = 2) +
+  scale_x_log10(labels = comma) +
+  labs(x = "Number of UMIs per barcode", y = "Fraction MT")
+```
+
+```{r, fig.width=6, fig.height=6}
+qc_70_brains %>% 
+  ggplot(aes(x = nUMI + 1, y = pctMT)) +
+  geom_point(alpha = .01, size = .5) +
+  geom_hline(yintercept = 0.2, lty = "dashed", color = "red") +
+  facet_wrap(~ pool, ncol = 2) +
+  scale_x_log10(labels = comma) +
+  labs(x = "Number of UMIs per barcode", y = "Fraction MT")
+```
