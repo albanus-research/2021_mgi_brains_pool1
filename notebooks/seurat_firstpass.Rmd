@@ -22,6 +22,7 @@ library(tidyr)
 library(scales)
 library(glue)
 
+library(SoupX)
 library(Matrix)
 library(Seurat)
 
@@ -40,7 +41,6 @@ qc <- data.table::fread("work/seurat/barcode_metrics.tsv.gz", header = T, data.t
   mutate(barcode  = case_when(pool == "pool2" ~ gsub("-1$", "-2", barcode), 
                               T ~ barcode)) 
 ```
-
 
 ```{r}
 demux <- lapply(1:16, function(i) {
@@ -85,27 +85,47 @@ table(qc$barcode %in% barcodes_to_keep, qc$pool)
 ```
 
 ```{r}
-# indir1 <- "work/cellranger_gex/outs/filtered_feature_bc_matrix"
-# indir2 <- file.path("../2021_mgi_brains_pool2", indir1)
-# 
-# read_raw_counts <- function(indir) {
-#   bc <- read.table(file.path(indir, "barcodes.tsv.gz"))[,1]
-#   features <- read.table(file.path(indir, "features.tsv.gz"))[,2]
-#   mat <- readMM(file.path(indir, "matrix.mtx.gz"))
-#   colnames(mat) <- bc
-#   rownames(mat) <- features
-#   return(mat)
-# }
-# 
-# m1 <- read_raw_counts(indir1)
-# m1 <- m1[, which(colnames(m1) %in% barcodes_to_keep)]
-# m2 <- read_raw_counts(indir2)
-# colnames(m2) <- gsub("-1$", "-2", colnames(m2))
-# m2 <- m2[, which(colnames(m2) %in% barcodes_to_keep)]
-# 
-# dim(m1)
-# dim(m2)
-# 
+indir1 <- "work/cellranger_gex/outs"
+indir2 <- file.path("../2021_mgi_brains_pool2", indir1)
+
+read_raw_counts <- function(indir, suffix) {
+  indir <- file.path(indir, suffix)
+  bc <- read.table(file.path(indir, "barcodes.tsv.gz"))[,1]
+  features <- read.table(file.path(indir, "features.tsv.gz"))[,2]
+  mat <- readMM(file.path(indir, "matrix.mtx.gz"))
+  colnames(mat) <- bc
+  rownames(mat) <- features
+  return(mat)
+}
+
+m1_raw <- read_raw_counts(indir1, "raw_feature_bc_matrix")
+m1_filt <- read_raw_counts(indir1, "filtered_feature_bc_matrix")
+m2_raw <- read_raw_counts(indir2, "raw_feature_bc_matrix")
+m2_filt <- read_raw_counts(indir2, "filtered_feature_bc_matrix")
+```
+
+```{r}
+make_soupchannel <- function(m_raw, m_filt) {
+  m_raw <- m_raw[which(rownames(m_raw) %in% rownames(m_filt)), ]
+  rownames(m_raw) <- paste(rownames(m_raw), 1:nrow(m_raw), sep = "__")
+  rownames(m_filt) <- paste(rownames(m_filt), 1:nrow(m_filt), sep = "__")
+  sc <- SoupChannel(m_raw, m_filt)
+  return(sc)
+}
+
+sc <- make_soupchannel(m1_raw, m1_filt)
+```
+
+
+```{r}
+m1 <- m1_filt[, which(colnames(m1) %in% barcodes_to_keep)]
+m2 <- m2_filt
+colnames(m2) <- gsub("-1$", "-2", colnames(m2))
+m2 <- m2[, which(colnames(m2) %in% barcodes_to_keep)]
+
+dim(m1)
+dim(m2)
+
 # sobjs <- list(m1, m2) %>%
 #   lapply(function(i) {
 #     sobj <- CreateSeuratObject(counts = i, meta.data = md)
@@ -116,7 +136,7 @@ table(qc$barcode %in% barcodes_to_keep, qc$pool)
 #     sobj <- FindNeighbors(sobj, dims = 1:30)
 #     sobj <- FindClusters(sobj)
 #   })
-
+# 
 # saveRDS(sobjs, file = "work/seurat/preprocessed_sobjs.rds")
 # saveRDS(sobjs, file = "work/seurat/preprocessed_sobjs.no_dbls.rds")
 sobjs <- readRDS("work/seurat/preprocessed_sobjs.rds")
