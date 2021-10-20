@@ -71,6 +71,9 @@ demux <- bind_rows(demux, demux2) %>%
   mutate(primary_sample = case_when(demuxlet_call != "SNG" ~ demuxlet_call, 
                                     T ~ primary_sample))
 rm(demux2)
+
+write.table(demux, file = "data/demuxlet_assignmnents.tsv", col.names = T, 
+            row.names = F, sep = "\t", quote = F)
 ```
 
 ```{r}
@@ -118,14 +121,20 @@ sc <- make_soupchannel(m1_raw, m1_filt)
 
 
 ```{r}
-m1 <- m1_filt[, which(colnames(m1) %in% barcodes_to_keep)]
+m1 <- m1_filt[, which(colnames(m1_filt) %in% barcodes_to_keep)]
 m2 <- m2_filt
 colnames(m2) <- gsub("-1$", "-2", colnames(m2))
 m2 <- m2[, which(colnames(m2) %in% barcodes_to_keep)]
 
+# m_list <- list(pool1 = m1, pool2 = m2)
+# 
+# saveRDS(m_list, file = "share/pool1-2_mats.filtered.rds")
+
 dim(m1)
 dim(m2)
+```
 
+```{r}
 # sobjs <- list(m1, m2) %>%
 #   lapply(function(i) {
 #     sobj <- CreateSeuratObject(counts = i, meta.data = md)
@@ -139,9 +148,53 @@ dim(m2)
 # 
 # saveRDS(sobjs, file = "work/seurat/preprocessed_sobjs.rds")
 # saveRDS(sobjs, file = "work/seurat/preprocessed_sobjs.no_dbls.rds")
-sobjs <- readRDS("work/seurat/preprocessed_sobjs.rds")
+sobjs <- readRDS("work/seurat/preprocessed_sobjs.no_dbls.rds")
+names(sobjs) <- c("pool1", "pool2")
 
 sobjs
+```
+
+# Look at PC correlation with tech. metrics
+```{r, fig.width=8}
+plot_pca_corr <- function(sobj) {
+  emb <- Embeddings(sobj, reduction = "pca") %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column("barcode") %>% 
+    left_join(sobj@meta.data, by = "barcode") %>% 
+    {
+      # One-hot encode sample IDs with model.matrix
+      tmp <- model.matrix(barcode ~ primary_sample, data = .)
+      tmp <- tmp[, -1] %>% 
+        as.data.frame()
+      # Combine temporary object and output
+      cbind(., tmp)
+    } %>% 
+    select(-primary_sample) %>% 
+    select(nCount_RNA, nFeature_RNA, nUMI, pctMT, starts_with("primary_sample"), PC_1:PC_50) %>% 
+    gather("pc", "pc_val", starts_with("PC_")) %>% 
+    gather("metric", "val_metric", nCount_RNA:pctMT, starts_with("primary_sample")) %>% 
+    group_by(pc, metric) %>% 
+    summarise(cor = cor(pc_val, val_metric, method = "s")) %>% 
+    mutate(pc = factor(gsub("PC_", "", pc), levels = 1:50)) %>% 
+    mutate(metric = gsub("primary_sample", "", metric))
+  emb %>% 
+    ggplot(aes(x = pc, y = metric, fill = cor)) +
+    geom_tile(color = "gray") +
+    scale_fill_distiller(palette = "RdBu", limits = c(-.7,.7)) +
+    labs(x = "PC", y = "Metric", fill = "Spearman") +
+    theme(axis.text.x = element_text(angle = 90, vjust = .5, hjust = 1)) 
+}
+
+lapply(sobjs, plot_pca_corr)
+```
+
+```{r}
+sobjs <- sobjs %>% 
+  lapply(function(sobj) {
+    sobj <- RunUMAP(sobj, dims = 2:10)
+    sobj <- FindNeighbors(sobj, dims = 2:10)
+    sobj <- FindClusters(sobj)
+  })
 ```
 
 
@@ -153,7 +206,21 @@ sobjs
   })
 ```
 
-
+```{r, fig.width=8}
+1:2 %>% 
+  lapply(function(i) {
+    sobjs[[i]]@meta.data %>% 
+      count(seurat_clusters, primary_sample) %>% 
+      group_by(seurat_clusters) %>% 
+      mutate(frac = n / sum(n)) %>% 
+      ungroup() %>% 
+      ggplot(aes(x = seurat_clusters, y = frac, fill = primary_sample)) +
+      geom_col() +
+      scale_fill_brewer(palette = "Set1") +
+      labs(x = "Cluster", y = "Fraction", fill = "Sample") +
+      ggtitle(glue("Pool {i}"))
+  })
+```
 
 
 ```{r, fig.width=5}
@@ -180,11 +247,11 @@ sobjs
   })
 ```
 
-
 ```{r, fig.height=6, fig.width=20}
 marker_genes <- list(
   OPCs = c(
-    'TNR','PDGFRA' #'CNTN1'
+    'TNR','PDGFRA', 'CNTN1',
+    "LHFPL3", "PCDH15"
     ),
   Oligos = c(
     'QDPR','TULP4','PIP4K2A','TMEM144','SLC44A1','CNP','SLAIN1','ANLN','MOBP',
@@ -198,12 +265,12 @@ marker_genes <- list(
     'CNR1','RELN'
     ), 
   Neurons_exc = c(
-    "RALYL", "KCNIP4", "CBLN2", "LDB2", "KCNQ5",
-    "SCL17A7", "SATB2"
+    "RALYL", "KCNIP4", "CBLN2", "LDB2", "KCNQ5", "SATB2"
+    # "SCL17A7"  Not present in the 67-brain data 
   ),
   Neurons_inh = c(
-    "NXPH1", "LHFPL3", "PCDH15", "GRIK1", "ADARB2",
-    "GAD2"
+    "NXPH1", "GRIK1", "ADARB2", "GAD2"
+    # "LHFPL3", "PCDH15" These are more OPC https://doi.org/10.1016/j.cell.2020.06.027
   ),
   Microglia = c(
     'C3','CCL4','MSR1','OLR1','GPR183','CD53','LCP1','HAVCR2','LHFPL2','PLEK',
@@ -225,11 +292,12 @@ marker_genes <- list(
 )
 
 
-DotPlot(sobjs[[1]], features = unlist(marker_genes) %>% unique()) + 
+
+DotPlot(sobjs[[1]], features = unlist(marker_genes) %>% unique(), col.min = 0) + 
   RotatedAxis() +
   ggtitle("Pool1")
 
-DotPlot(sobjs[[2]], features = unlist(marker_genes) %>% unique()) + 
+DotPlot(sobjs[[2]], features = unlist(marker_genes) %>% unique(), col.min = 0) + 
   RotatedAxis() +
   ggtitle("Pool2")
 ```
@@ -238,18 +306,56 @@ DotPlot(sobjs[[2]], features = unlist(marker_genes) %>% unique()) +
 marker_genes %>% 
   names() %>% 
   lapply(function(i) {
-    DotPlot(sobjs[[1]], features = marker_genes[[i]]) + 
+    DotPlot(sobjs[[1]], features = marker_genes[[i]], col.min = 0) + 
       RotatedAxis() +
       ggtitle(glue("Pool1: {i}"))    
   })
+```
+
+```{r}
+clus_ids <- sobjs[[1]]@meta.data$seurat_clusters %>% as.character()
+sobjs[[1]]@meta.data$celltypes <- case_when(
+  clus_ids %in% as.character(15) ~ "OPC",
+  clus_ids %in% as.character(c(6, 8)) ~ "Oligos", 
+  clus_ids %in% as.character(c(0:5, 10:11, 13)) ~ "Neuron_exc",
+  clus_ids %in% as.character(c(7, 9, 15, 16)) ~ "Neuron_inh",
+  clus_ids %in% as.character(c(14)) ~ "MG-Endo", 
+  clus_ids %in% as.character(c(17)) ~ "MG", 
+  clus_ids %in% as.character(c(18, 12)) ~ "Astro", 
+  T ~ clus_ids
+)
 ```
 
 ```{r, fig.height=6, fig.width=7}
 marker_genes %>% 
   names() %>% 
   lapply(function(i) { 
-    DotPlot(sobjs[[2]], features = marker_genes[[i]]) + 
+    DotPlot(sobjs[[2]], features = marker_genes[[i]], col.min = 0) + 
       RotatedAxis() +
       ggtitle(glue("Pool2: {i}"))    
+  })
+```
+
+```{r}
+clus_ids <- sobjs[[2]]@meta.data$seurat_clusters %>% as.character()
+sobjs[[2]]@meta.data$celltypes <- case_when(
+  clus_ids %in% as.character(16) ~ "OPC",
+  clus_ids %in% as.character(c(0, 1, 8, 13)) ~ "Oligos", 
+  clus_ids %in% as.character(c(2:6, 9, 10)) ~ "Neuron_exc",
+  clus_ids %in% as.character(c(7, 12, 16, 17)) ~ "Neuron_inh",
+  clus_ids %in% as.character(c(18)) ~ "MG", 
+  clus_ids %in% as.character(c(19)) ~ "Endo", 
+  clus_ids %in% as.character(c(11, 15)) ~ "Astro", 
+  T ~ clus_ids
+)
+```
+
+```{r, fig.width=5}
+1:2 %>% 
+  lapply(function(i) {
+    sobj <- sobjs[[i]]
+    Idents(sobj) <- "celltypes"
+    DimPlot(sobj, label = TRUE) + NoLegend() +
+      ggtitle(glue("Pool {i}"))
   })
 ```
