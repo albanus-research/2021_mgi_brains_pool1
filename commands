@@ -28,7 +28,9 @@ cellranger count --id cellranger_gex \
 
 # Other analyses
 ## Demuxlet
-snakemake -pr --configfile workflow/config/config.yml --use-conda -c1 -nq
+snakemake -pr --configfile workflow/config/config.yml --use-conda -c1 -nq  # dry run
+snakemake -pr --configfile workflow/config/config.yml --use-conda -c12 -j12
+
 
 ## QC for 40 out of 70 brain samples
 snakemake -pr -s workflow/rules/get_qc_from_70_brains.smk \
