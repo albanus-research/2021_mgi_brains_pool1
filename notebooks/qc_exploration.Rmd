@@ -94,7 +94,7 @@ get_qc <- function(mat, id) {
 }
 
 # qc <- get_qc(m1, "pool1") %>%
-#   bind_rows(get_qc(m2, "pool2")) %>% 
+#   bind_rows(get_qc(m2, "pool2")) %>%
 #   left_join(called_bcs, by = c("barcode", "pool"))
 # qc$cellranger_nuclei[is.na(qc$cellranger_nuclei)] <- F
 # 
@@ -162,8 +162,8 @@ plot_pool <- function(pool_choose) {
     scale_color_viridis_c(trans = "log10") 
 }
 
-plot_pool("pool1")
-plot_pool("pool2")
+plot_pool("Pool1")
+plot_pool("Pool2")
 
 plot_pool <- function(pool_choose) {
   qc %>% 
@@ -176,8 +176,8 @@ plot_pool <- function(pool_choose) {
     scale_color_viridis_c(trans = "log10") 
 }
 
-plot_pool("pool1")
-plot_pool("pool2")
+plot_pool("Pool1")
+plot_pool("Pool2")
 ```
 
 ```{r, fig.width=6}
@@ -192,8 +192,8 @@ plot_pool <- function(pool_choose) {
     labs(title = pool_choose)
 }
 
-plot_pool("pool1")
-plot_pool("pool2")
+plot_pool("Pool1")
+plot_pool("Pool2")
 ```
 
 
@@ -211,8 +211,8 @@ plot_pool <- function(pool_choose) {
     labs(subtitle = "≥500 UMIs, ≤20% MT, called by Cellranger")
 }
 
-plot_pool("pool1")
-plot_pool("pool2")
+plot_pool("Pool1")
+plot_pool("Pool2")
 ```
 
 

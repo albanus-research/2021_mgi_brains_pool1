@@ -8,13 +8,13 @@ ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R1_001.fastq.gz data/fastq/gex/
 ln -s  ${indir}/TWJL-OH-1-lib2_S2_L004_R2_001.fastq.gz data/fastq/gex/
 
 # Run cellranger
-## Multi
+## Using 3' CellPlex CMO multiplexed samples 
 mkdir -p work
 cd work
 cellranger multi --localcores 60 --id=cellranger_redo2 \
     --csv=../workflow/config/cellranger_config.csv
 
-## Without multiplexing library
+## Without CMO multiplexed samples - i.e. treat it as a regular GEX experiment
 cd work
 ref="/home/dricardo/data/reference/human/GRCh38/cellranger/refdata-gex-GRCh38-2020-A"
 cellranger count --id cellranger_gex \
