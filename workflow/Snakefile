@@ -9,13 +9,22 @@ DEMUXLET_DIR = join(RESULTS, "demuxlet_rm_singletons_only")
 
 
 rule all:
+    """
+    Snakefile rule to specify which files to generate.
+    """
     input:
-        join(FASTQC_DIR, "done.ok"),
         join(DEMUXLET_DIR, "output_by_batch", "finished"),
+        # Uncomment if running fastqc
+        # join(FASTQC_DIR, "done.ok"),  
+        # Uncomment if running demuxlet in all barcodes
+        # join(DEMUXLET_DIR, "output_only_assigned", "finished"),  
 
 
 
 rule fastqc:
+    """
+    Run fastqc on all fastq files in the fastq directory.
+    """
     output:
         join(FASTQC_DIR, "done.ok"),
     params:
@@ -30,6 +39,9 @@ rule fastqc:
         """
 
 rule make_sample_list:
+    """
+    Make a list of samples to process based on the config file
+    """
     output:
         join(DEMUXLET_DIR, "input", "sample_list.txt"),
     params:
@@ -40,6 +52,9 @@ rule make_sample_list:
         """
 
 rule get_genic_regions:
+    """
+    Make a list of genic regions to subset the input VCF files
+    """
     input:
         gtf = config["gene_gtf"],
     output:
@@ -56,6 +71,8 @@ rule get_genic_regions:
 
 rule subset_vcf_samples:
     """
+    Subset the VCF files to only include the samples in the sample list 
+    and the genic regions.
     Additional filters to decrease variants to < 2 million:
         - Overlap genic regions (including introns and UTRs)
         - SNPs only (bcftools -v snps + awk length == 1)
@@ -89,6 +106,13 @@ rule subset_vcf_samples:
         """
 
 rule get_barcode_list:
+    """
+    Make a list of barcodes to run demuxlet. This rule can be ignored if
+    you have a pre-made barcode list. In that case, just copy the barcode
+    path to input.bcs in rule split_batches below.
+    Suggestion: use the barcodes called as cell by CellRanger in the
+    filtered matrices output directory.
+    """
     input:
         config["barcodes_to_use"],
     output:
@@ -98,32 +122,15 @@ rule get_barcode_list:
         Rscript workflow/scripts/get_cmo-assigned_bcs.R {input} {output}
         """
 
-rule demuxlet:
-    input:
-        bam = config["10x_bam"],
-        vcf = rules.subset_vcf_samples.output.vcf,
-        bcs = rules.get_barcode_list.output,
-    output:
-        join(DEMUXLET_DIR, "output_only_assigned", "single.best"),
-    params:
-        "--out {}".format(
-            join(DEMUXLET_DIR, "demuxlet", "output_only_assigned", "demux")
-        ),
-        "--min-MQ {}".format(config["min_mapq"]),
-        # "--min-total {}".format(config["min_umi"]),
-        "--field GT",
-        "--alpha 0 --alpha 0.5",
-    conda:
-        "envs/demuxlet.yml"
-    shell:
-        """
-        demuxlet --sam {input.bam} --vcf {input.vcf} \
-            --group-list {input.bcs} {params}
-        """
-
 checkpoint split_batches:
+    """
+    Split the library into batches to speed up demuxlet.
+    Snakemake checkpoint because the number of batches is not known until
+    this rule is run - it varies by the number of nuclei in the library.
+    """
     input:
         rules.get_barcode_list.output,
+        # config["barcodes_to_use"],  # in case using a pre-made barcode list
     output:
         directory(join(DEMUXLET_DIR, "input", "batches")),
     params:
@@ -137,6 +144,9 @@ checkpoint split_batches:
         """
 
 rule demuxlet_batch:
+    """
+    Run demuxlet on each batch.
+    """
     input:
         bam = config["10x_bam"],
         vcf = rules.subset_vcf_samples.output.vcf,
@@ -166,12 +176,19 @@ rule demuxlet_batch:
         """
 
 def aggregate_input(wildcards):
+    """
+    Make a list of all the demuxlet output files to use as input in rule
+    demuxlet_aggregate.
+    """
     checkpoint_output = checkpoints.split_batches.get(**wildcards).output[0]
     return expand(
         join(DEMUXLET_DIR, "output_by_batch", "demux_{i}.single"),
         i=glob_wildcards(os.path.join(checkpoint_output, "{i}.txt")).i)
 
 rule demuxlet_aggregate:
+    """
+    Aggregate demuxlet output
+    """
     input:
         aggregate_input,
     output:
@@ -179,4 +196,34 @@ rule demuxlet_aggregate:
     shell:
         """
         touch {output}
+        """
+
+rule demuxlet_full:
+    """
+    Optional rule to run demuxlet on the entire library in one go. 
+    If not using a pre-made barcode list, then you need to remove the input.bcs 
+    parameter and the corresponding --group-list flag in the shell invocation 
+    and specify the --min-total parameter.
+    """
+    input:
+        bam = config["10x_bam"],
+        vcf = rules.subset_vcf_samples.output.vcf,
+        bcs = rules.get_barcode_list.output,
+        # bcs = config["barcodes_to_use"],  # in case using a pre-made barcode list
+    output:
+        join(DEMUXLET_DIR, "output_only_assigned", "single.best"),
+    params:
+        "--out {}".format(
+            join(DEMUXLET_DIR, "demuxlet", "output_only_assigned", "demux")
+        ),
+        "--min-MQ {}".format(config["min_mapq"]),
+        # "--min-total {}".format(config["min_umi"]),
+        "--field GT",
+        "--alpha 0 --alpha 0.5",
+    conda:
+        "envs/demuxlet.yml"
+    shell:
+        """
+        demuxlet --sam {input.bam} --vcf {input.vcf} \
+            --group-list {input.bcs} {params}
         """

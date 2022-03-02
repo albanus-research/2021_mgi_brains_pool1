@@ -13,8 +13,8 @@ sample_vcf:
   GRCh38/Brain_GWAS_2020.no_swap.vcf.gz"
 min_mapq: 255
 min_umi: 500  # not necessary when pre-selecting CBs to use
-n_bcs_per_batch: 1001  # Multiples of 1K trigger BC count message constantly...
-barcodes_to_use: 
+n_bcs_per_batch: 1001  # Do not use multiples of 1K - trigger BC count message constantly...
+barcodes_to_use: # Demuxlet is expecting one barcode per line
   "work/cellranger_multi/outs/multi/multiplexing_analysis/\
   assignment_confidence_table.csv"
 gene_gtf: 
