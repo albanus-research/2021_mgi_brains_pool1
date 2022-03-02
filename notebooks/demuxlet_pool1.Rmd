@@ -47,16 +47,16 @@ cmo_ids <- read.table("data/cmo_assignments.txt", header = T)
 ```
 
 ```{r}
-mol_info <- DropletUtils::read10xMolInfo("work/cellranger_gex/outs/molecule_info.h5")
-bc_md2<- data.frame(
-  barcode = paste0(mol_info$data$cell, "-1"), 
-  n_umi = mol_info$data$umi,
-  reads = mol_info$data$reads
-) %>% 
-  filter(barcode %in% conf_table$Barcodes) %>% 
-  group_by(barcode) %>% 
-  summarise(n_umi = sum(n_umi),
-            reads = sum(reads))
+# mol_info <- DropletUtils::read10xMolInfo("work/cellranger_gex/outs/molecule_info.h5")
+# bc_md2 <- data.frame(
+#   barcode = paste0(mol_info$data$cell, "-1"), 
+#   n_umi = mol_info$data$umi,
+#   reads = mol_info$data$reads
+# ) %>% 
+#   filter(barcode %in% conf_table$Barcodes) %>% 
+#   group_by(barcode) %>% 
+#   summarise(n_umi = sum(n_umi),
+#             reads = sum(reads))
 ```
 
 ```{r}
