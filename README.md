@@ -3,12 +3,12 @@ Ricardo D'Oliveira Albanus - Harari Lab, WashU St. Louis
 
 ### Usage
 `commands` has all the pipeline invocations for CellRanger and Demuxlet.
-`notebooks` has the R notebooks for data analysis.
-Other folders are used by Snakemake.
+`notebooks` has the R notebooks for data analysis. `compiled_notebooks.tar.gz` has the compiled R notebooks. Other folders are used by Snakemake.
 
 ### Running CellRanger
-3' CellPlex multiplexing: Edit the cellranger config files in the `workflow/config` directory.
-Regular GEX: edit the CellRanger invocation directly in `commands`.
+**3' CellPlex multiplexing**: Edit the cellranger config files in the `workflow/config` directory.
+
+**Regular GEX**: Edit the CellRanger invocation directly in `commands`.
 
 ### Running demuxlet
 Edit `workflow/config.yml` to point to the relevant files and run Snakemake:
